@@ -124,3 +124,26 @@ test('help ve bilinmeyen komut bozuk veri dosyasında da kullanımı yazar', () 
     assert.equal(u.status, 1); assert.match(u.stdout, /Kullanım/); assert.equal(u.stderr, '');
   } finally { rmSync(dir, { recursive: true }); }
 });
+
+test('save var olan geçici yol çakışmasında o girdiyi silmez', () => {
+  const dir = tmp(); const f = join(dir, 't.json'); const clash = join(dir, 'clash.tmp');
+  try {
+    writeFileSync(clash, 'keep');
+    assert.throws(() => save(f, { nextId: 1, tasks: [] }, { tmpName: () => clash }), { code: 'EEXIST' });
+    assert.equal(readFileSync(clash, 'utf8'), 'keep');
+    assert.equal(existsSync(f), false);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+test('nextId tükendiğinde add açık hata verir ve dosya değişmez', () => {
+  const dir = tmp(); const f = join(dir, 't.json');
+  const env = { ...process.env, TASKS_FILE: f };
+  try {
+    const body = JSON.stringify({ nextId: Number.MAX_SAFE_INTEGER, tasks: [] });
+    writeFileSync(f, body);
+    assert.throws(() => addTask(load(f), 'x'), /tükendi/);
+    const r = spawnSync(process.execPath, [cli, 'add', 'x'], { env, encoding: 'utf8' });
+    assert.equal(r.status, 1); assert.match(r.stderr, /tükendi/);
+    assert.equal(readFileSync(f, 'utf8'), body);
+  } finally { rmSync(dir, { recursive: true }); }
+});

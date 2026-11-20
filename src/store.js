@@ -17,13 +17,17 @@ export function load(file) {
   return data;
 }
 
-export function save(file, data) {
-  const tmp = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+export function save(file, data, { tmpName = () => `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp` } = {}) {
+  const tmp = tmpName();
+  let created = false;
   try {
-    writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { flag: 'wx' });
+    const fd = openSync(tmp, 'wx');
+    created = true;
+    try { writeFileSync(fd, JSON.stringify(data, null, 2) + '\n'); } finally { closeSync(fd); }
     renameSync(tmp, file);
   } catch (e) {
-    try { unlinkSync(tmp); } catch {}
+    // Only remove the temp file if this call created it (EEXIST: the entry belongs to someone else).
+    if (created) { try { unlinkSync(tmp); } catch {} }
     throw e;
   }
 }
@@ -64,6 +68,7 @@ export function update(file, fn, opts) {
 export function addTask(data, title) {
   title = String(title ?? '').trim();
   if (!title) throw new Error('Görev başlığı boş olamaz.');
+  if (!Number.isSafeInteger(data.nextId + 1)) throw new Error('Görev kimliği sayacı tükendi; yeni görev eklenemez.');
   const task = { id: data.nextId++, title, done: false, createdAt: new Date().toISOString() };
   data.tasks.push(task);
   return task;
