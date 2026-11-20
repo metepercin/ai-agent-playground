@@ -57,8 +57,8 @@ test('CLI uçtan uca: add, list, done', () => {
 });
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, readdirSync, symlinkSync, existsSync, mkdirSync } from 'node:fs';
-import { withLock } from '../src/store.js';
+import { writeFileSync, readdirSync, symlinkSync, existsSync, mkdirSync, lstatSync, readlinkSync } from 'node:fs';
+import { withLock, lockPath, isCaseInsensitiveDir } from '../src/store.js';
 
 const runCli = (args, file) => new Promise((res) => {
   const p = spawn(process.execPath, [cli, ...args], { env: { ...process.env, TASKS_FILE: file } });
@@ -99,19 +99,43 @@ test('kilit fn hata verse de kaldırılır', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('save sembolik bağ üzerinden yazmaz, geçici dosya bırakmaz, uzun adlarla çalışır', () => {
+test('save eski sabit geçici yoldaki sembolik bağı izlemez', () => {
   const dir = tmp();
   try {
     const victim = join(dir, 'victim'); writeFileSync(victim, 'keep');
-    symlinkSync(victim, join(dir, 't.json.tmp'));
+    const old = join(dir, 't.json.tmp');
+    symlinkSync(victim, old);
+    const f = join(dir, 't.json');
+    save(f, { nextId: 7, tasks: [] });
+    assert.equal(readFileSync(victim, 'utf8'), 'keep');
+    assert.ok(lstatSync(old).isSymbolicLink());
+    assert.equal(readlinkSync(old), victim);
+    assert.equal(load(f).nextId, 7);
+    assert.deepEqual(readdirSync(dir).sort(), ['t.json', 't.json.tmp', 'victim']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('save uzun dosya adlarıyla çalışır ve hata durumunda geçici dosya bırakmaz', () => {
+  const dir = tmp();
+  try {
     const long = join(dir, 'a'.repeat(250) + '.json');
     save(long, { nextId: 1, tasks: [] });
-    assert.equal(readFileSync(victim, 'utf8'), 'keep');
     assert.equal(load(long).nextId, 1);
-    // failure: target is a directory -> rename fails, temp removed
     const bad = join(dir, 'd.json'); mkdirSync(bad);
     assert.throws(() => save(bad, { nextId: 1, tasks: [] }));
-    assert.deepEqual(readdirSync(dir).sort(), ['a'.repeat(250) + '.json', 'd.json', 't.json.tmp', 'victim'].sort());
+    assert.deepEqual(readdirSync(dir).sort(), ['a'.repeat(250) + '.json', 'd.json']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('lockPath: büyük/küçük harf takma adları duyarsız dizinde aynı kilidi kullanır', () => {
+  const dir = tmp();
+  try {
+    const ci = { probe: () => true }, cs = { probe: () => false };
+    assert.equal(lockPath(join(dir, 'tasks.json'), ci), lockPath(join(dir, 'TASKS.json'), ci));
+    assert.notEqual(lockPath(join(dir, 'tasks.json'), cs), lockPath(join(dir, 'TASKS.json'), cs));
+    assert.notEqual(lockPath(join(dir, 'a.json'), ci), lockPath(join(dir, 'b.json'), ci));
+    assert.equal(typeof isCaseInsensitiveDir(dir), 'boolean');
+    assert.deepEqual(readdirSync(dir), []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

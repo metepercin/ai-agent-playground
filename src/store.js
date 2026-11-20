@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 const { readFileSync, closeSync, openSync, renameSync, unlinkSync, existsSync } = fs;
 import { createHash, randomBytes } from 'node:crypto';
-import { dirname, basename, join } from 'node:path';
+import { dirname, basename, join, resolve } from 'node:path';
 
 const LOCK_TIMEOUT_MS = 5000;
 const LOCK_RETRY_MS = 20;
@@ -28,12 +28,35 @@ function sibling(file, prefix, suffix) {
   return join(dirname(file), `.${prefix}-${h}${suffix}`);
 }
 
+// Probes whether dir is case-insensitive: create a temp file, look it up by its upper-case name.
+// If the probe cannot run, assume case-insensitive (only costs extra lock contention).
+export function isCaseInsensitiveDir(dir) {
+  const name = `.case-probe-${process.pid}-${randomBytes(6).toString('hex')}`;
+  const p = join(dir, name);
+  try {
+    closeSync(openSync(p, 'wx', 0o600));
+  } catch { return true; }
+  try { return existsSync(join(dir, name.toUpperCase())); }
+  finally { try { unlinkSync(p); } catch {} }
+}
+
+// Lock path for a data file. The directory is resolved with realpath (so symlinked directory aliases
+// agree); on a case-insensitive directory the name is lower-cased so case aliases share one lock,
+// even when the data file does not exist yet. `probe` may be injected for tests.
+export function lockPath(file, { probe = isCaseInsensitiveDir } = {}) {
+  const abs = resolve(file);
+  const dir = fs.realpathSync(dirname(abs));
+  let name = basename(abs);
+  if (probe(dir)) name = name.toLowerCase();
+  return sibling(join(dir, name), 'lock', '.lock');
+}
+
 const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
 
 // Serializes read-modify-write across processes using an exclusive lock file.
 // The timeout uses a monotonic clock so wall-clock changes cannot affect it.
 export function withLock(file, fn, { timeoutMs = LOCK_TIMEOUT_MS } = {}) {
-  const lock = sibling(file, 'lock', '.lock');
+  const lock = lockPath(file);
   const start = process.hrtime.bigint();
   const limit = BigInt(timeoutMs) * 1000000n;
   let fd;
