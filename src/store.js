@@ -37,15 +37,17 @@ const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 
 // Serializes read-modify-write cycles across processes via an exclusive lock file.
 export function withLock(file, fn, { timeoutMs = 5000, retryMs = 10 } = {}) {
   const lock = file + '.lock';
-  const deadline = Date.now() + timeoutMs;
+  const start = process.hrtime.bigint(); // monotonic clock
+  const elapsedMs = () => Number(process.hrtime.bigint() - start) / 1e6;
   let fd;
   for (;;) {
     try { fd = openSync(lock, 'wx'); break; } catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      if (Date.now() >= deadline) {
+      const remaining = timeoutMs - elapsedMs();
+      if (remaining <= 0) {
         throw new Error(`Kilit alınamadı (zaman aşımı): ${lock} — başka bir işlem çalışıyor olabilir.`);
       }
-      sleep(retryMs);
+      sleep(Math.min(retryMs, remaining));
     }
   }
   try {
