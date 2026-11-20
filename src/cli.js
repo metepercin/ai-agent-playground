@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { join } from 'node:path';
-import { load, save, addTask, completeTask, listTasks, formatTask } from './store.js';
+import { load, update, addTask, completeTask, listTasks, formatTask } from './store.js';
 
 const USAGE = `Kullanım:
   task add <başlık>      Görev ekle
@@ -11,29 +11,28 @@ Veri dosyası: $TASKS_FILE (varsayılan: ./tasks.json)`;
 export function run(argv, env = process.env, out = console.log) {
   const file = env.TASKS_FILE || join(process.cwd(), 'tasks.json');
   const [cmd, ...rest] = argv;
-  const data = load(file);
+  if (!['add', 'list', 'done'].includes(cmd)) {
+    out(USAGE);
+    if (cmd && cmd !== 'help' && cmd !== '--help') process.exitCode = 1;
+    return;
+  }
   switch (cmd) {
     case 'add': {
-      const t = addTask(data, rest.join(' '));
-      save(file, data);
+      const t = update(file, (data) => addTask(data, rest.join(' ')));
       out(`Eklendi: #${t.id} ${t.title}`);
       return;
     }
     case 'list': {
-      const tasks = listTasks(data, { onlyPending: rest.includes('--pending') });
+      const tasks = listTasks(load(file), { onlyPending: rest.includes('--pending') });
       if (!tasks.length) out('Görev yok.');
       else tasks.forEach((t) => out(formatTask(t)));
       return;
     }
     case 'done': {
-      const t = completeTask(data, rest[0]);
-      save(file, data);
+      const t = update(file, (data) => completeTask(data, rest[0]));
       out(`Tamamlandı: #${t.id} ${t.title}`);
       return;
     }
-    default:
-      out(USAGE);
-      if (cmd && cmd !== 'help' && cmd !== '--help') process.exitCode = 1;
   }
 }
 
