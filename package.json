@@ -1,0 +1,9 @@
+{
+  "name": "task-cli",
+  "version": "1.0.0",
+  "description": "Basit CLI görev yöneticisi (bağımlılık yok)",
+  "type": "module",
+  "bin": { "task": "src/cli.js" },
+  "scripts": { "test": "node --test" },
+  "license": "MIT"
+}
