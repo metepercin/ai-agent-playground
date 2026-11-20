@@ -20,6 +20,8 @@ Veri dosyası varsayılan olarak çalışma dizinindeki `tasks.json`'dır; `TASK
 TASKS_FILE=~/gorevler.json node src/cli.js list
 ```
 
+`add` ve `done` işlemleri veri dosyasının yanındaki `<dosya>.lock` kilit dosyasıyla süreçler arasında sıraya alınır (en fazla ~5 sn beklenir, sonra hata verilir). Yazma, aynı dizindeki benzersiz bir geçici dosya üzerinden atomik `rename` ile yapılır. `nextId` pozitif bir tam sayı ve mevcut tüm id'lerden büyük olmalıdır; aksi halde dosya reddedilir. `help` ve bilinmeyen komutlar veri dosyasını okumaz.
+
 Hata durumunda (örn. bilinmeyen id) komut `1` çıkış koduyla biter.
 
 ### Testler

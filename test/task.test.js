@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { load, save, addTask, completeTask, listTasks } from '../src/store.js';
+import { spawnSync, spawn } from 'node:child_process';
+import { load, save, withLock, addTask, completeTask, listTasks } from '../src/store.js';
 
 const cli = new URL('../src/cli.js', import.meta.url).pathname;
 const tmp = () => mkdtempSync(join(tmpdir(), 'task-'));
@@ -53,5 +53,74 @@ test('CLI uçtan uca: add, list, done', () => {
     const bad = r('done', '42');
     assert.equal(bad.status, 1);
     assert.match(bad.stderr, /Hata/);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+const runAsync = (env, ...a) => new Promise((res) => {
+  const c = spawn(process.execPath, [cli, ...a], { env });
+  let err = ''; c.stderr.on('data', (d) => (err += d));
+  c.on('close', (code) => res({ code, err }));
+});
+
+test('eşzamanlı add çağrıları güncelleme kaybetmez', async () => {
+  const dir = tmp(); const f = join(dir, 't.json'); const env = { ...process.env, TASKS_FILE: f };
+  try {
+    const rs = await Promise.all(Array.from({ length: 12 }, (_, i) => runAsync(env, 'add', 't' + i)));
+    rs.forEach((r) => assert.equal(r.code, 0, r.err));
+    const d = load(f);
+    assert.equal(d.tasks.length, 12);
+    assert.equal(new Set(d.tasks.map((t) => t.id)).size, 12);
+    assert.equal(existsSync(f + '.lock'), false);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+test('withLock zaman aşımında açık hata verir ve başkasının kilidini silmez', () => {
+  const dir = tmp(); const f = join(dir, 't.json');
+  try {
+    writeFileSync(f + '.lock', '');
+    assert.throws(() => withLock(f, () => {}, { timeoutMs: 50 }), /Kilit alınamadı/);
+    assert.equal(existsSync(f + '.lock'), true);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+test('save sembolik bağlantı üzerinden yazmaz ve geçici dosya bırakmaz', () => {
+  const dir = tmp(); const f = join(dir, 't.json'); const victim = join(dir, 'victim');
+  try {
+    writeFileSync(victim, 'dokunma');
+    symlinkSync(victim, f + '.tmp');
+    save(f, { nextId: 1, tasks: [] });
+    assert.equal(readFileSync(victim, 'utf8'), 'dokunma');
+    assert.equal(load(f).nextId, 1);
+    const circular = {}; circular.c = circular;
+    assert.throws(() => save(f, circular));
+    assert.deepEqual(readdirSync(dir).filter((n) => n.endsWith('.tmp')), ['t.json.tmp']);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+test('geçersiz nextId reddedilir ve dosya değişmez', () => {
+  const dir = tmp(); const f = join(dir, 't.json');
+  const env = { ...process.env, TASKS_FILE: f };
+  try {
+    for (const bad of [undefined, null, 0, -1, 1.5, '3', 2 ** 60]) {
+      const body = JSON.stringify({ nextId: bad, tasks: [] });
+      writeFileSync(f, body);
+      assert.throws(() => load(f), /nextId/);
+      const r = spawnSync(process.execPath, [cli, 'add', 'x'], { env, encoding: 'utf8' });
+      assert.equal(r.status, 1); assert.match(r.stderr, /nextId/);
+      assert.equal(readFileSync(f, 'utf8'), body);
+    }
+    writeFileSync(f, JSON.stringify({ nextId: 3, tasks: [{ id: 3, title: 'a', done: false }] }));
+    assert.throws(() => load(f), /nextId/);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+test('help ve bilinmeyen komut bozuk veri dosyasında da kullanımı yazar', () => {
+  const dir = tmp(); const f = join(dir, 't.json'); const env = { ...process.env, TASKS_FILE: f };
+  try {
+    writeFileSync(f, '{bozuk');
+    const h = spawnSync(process.execPath, [cli, 'help'], { env, encoding: 'utf8' });
+    assert.equal(h.status, 0); assert.match(h.stdout, /Kullanım/);
+    const u = spawnSync(process.execPath, [cli, 'bilinmeyen'], { env, encoding: 'utf8' });
+    assert.equal(u.status, 1); assert.match(u.stdout, /Kullanım/); assert.equal(u.stderr, '');
   } finally { rmSync(dir, { recursive: true }); }
 });
