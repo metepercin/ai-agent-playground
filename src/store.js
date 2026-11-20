@@ -1,4 +1,5 @@
-import { readFileSync, writeSync, closeSync, openSync, renameSync, unlinkSync, existsSync } from 'node:fs';
+import fs from 'node:fs';
+const { readFileSync, closeSync, openSync, renameSync, unlinkSync, existsSync } = fs;
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, basename, join } from 'node:path';
 
@@ -65,14 +66,17 @@ export function update(file, fn) {
 
 export function save(file, data) {
   const tmp = sibling(file, 'tmp', `-${process.pid}-${randomBytes(6).toString('hex')}`);
-  let fd;
+  const buf = Buffer.from(JSON.stringify(data, null, 2) + '\n', 'utf8');
+  // exclusive: never follows/overwrites an existing path; if this throws we created nothing
+  let fd = openSync(tmp, 'wx', 0o600);
   try {
-    fd = openSync(tmp, 'wx', 0o600); // exclusive: never follows/overwrites an existing path
-  } catch (e) {
-    throw e; // we created nothing, so there is nothing of ours to remove
-  }
-  try {
-    writeSync(fd, JSON.stringify(data, null, 2) + '\n');
+    let off = 0;
+    while (off < buf.length) {
+      const n = fs.writeSync(fd, buf, off, buf.length - off); // may be a short write
+      if (!Number.isInteger(n) || n <= 0) throw new Error('Veri dosyası yazılamadı (kısa yazma): ' + tmp);
+      off += n;
+    }
+    fs.fsyncSync(fd);
     closeSync(fd); fd = undefined;
     renameSync(tmp, file);
   } catch (e) {

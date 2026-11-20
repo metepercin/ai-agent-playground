@@ -149,3 +149,32 @@ test('help ve bilinmeyen komut bozuk veri dosyasıyla da kullanım yazar', () =>
     assert.equal(u.status, 1); assert.match(u.stdout, /Kullanım/); assert.equal(u.stderr, '');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('save kısa yazmada dosyayı tam yazar ve geçici dosya bırakmaz', async () => {
+  const fs = (await import('node:fs')).default;
+  const dir = tmp();
+  const file = join(dir, 'tasks.json');
+  const data = { nextId: 3, tasks: [{ id: 1, title: 'a', done: false }, { id: 2, title: 'b', done: false }] };
+  const orig = fs.writeSync;
+  let calls = 0;
+  fs.writeSync = (fd, buf, off, len, ...r) => { calls++; return orig(fd, buf, off, calls === 1 ? Math.min(5, len) : len, ...r); };
+  try { save(file, data); } finally { fs.writeSync = orig; }
+  assert.ok(calls > 1);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), data);
+  assert.deepEqual(readdirSync(dir), ['tasks.json']);
+  rmSync(dir, { recursive: true });
+});
+
+test('save yazma hatasında eski dosyayı korur ve geçici dosyayı siler', async () => {
+  const fs = (await import('node:fs')).default;
+  const dir = tmp();
+  const file = join(dir, 'tasks.json');
+  save(file, { nextId: 2, tasks: [{ id: 1, title: 'old', done: false }] });
+  const before = readFileSync(file, 'utf8');
+  const orig = fs.writeSync;
+  fs.writeSync = () => 0; // no progress
+  try { assert.throws(() => save(file, { nextId: 9, tasks: [] })); } finally { fs.writeSync = orig; }
+  assert.equal(readFileSync(file, 'utf8'), before);
+  assert.deepEqual(readdirSync(dir), ['tasks.json']);
+  rmSync(dir, { recursive: true });
+});
