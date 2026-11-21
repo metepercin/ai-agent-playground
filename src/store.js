@@ -41,14 +41,15 @@ export function isCaseInsensitiveDir(dir) {
 }
 
 // Lock path for a data file. The directory is resolved with realpath (so symlinked directory aliases
-// agree); on a case-insensitive directory the name is lower-cased so case aliases share one lock,
-// even when the data file does not exist yet. `probe` may be injected for tests.
+// agree); on a case-insensitive directory every data file shares one fixed
+// per-directory lock, even when the data file does not exist yet. `probe` may be injected for tests.
 export function lockPath(file, { probe = isCaseInsensitiveDir } = {}) {
   const abs = resolve(file);
   const dir = fs.realpathSync(dirname(abs));
-  let name = basename(abs);
-  if (probe(dir)) name = name.toLowerCase();
-  return sibling(join(dir, name), 'lock', '.lock');
+  // Case-insensitive directory: one shared lock for the whole directory, since we cannot
+  // reproduce the filesystem's own case mapping (e.g. Σ/σ/ς).
+  if (probe(dir)) return join(dir, '.lock-dir.lock');
+  return sibling(join(dir, basename(abs)), 'lock', '.lock');
 }
 
 const sleepBuf = new Int32Array(new SharedArrayBuffer(4));

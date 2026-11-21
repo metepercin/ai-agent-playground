@@ -133,7 +133,9 @@ test('lockPath: büyük/küçük harf takma adları duyarsız dizinde aynı kili
     const ci = { probe: () => true }, cs = { probe: () => false };
     assert.equal(lockPath(join(dir, 'tasks.json'), ci), lockPath(join(dir, 'TASKS.json'), ci));
     assert.notEqual(lockPath(join(dir, 'tasks.json'), cs), lockPath(join(dir, 'TASKS.json'), cs));
-    assert.notEqual(lockPath(join(dir, 'a.json'), ci), lockPath(join(dir, 'b.json'), ci));
+    assert.equal(lockPath(join(dir, 'a.json'), ci), lockPath(join(dir, 'b.json'), ci));
+    assert.equal(lockPath(join(dir, 'Σ.json'), ci), lockPath(join(dir, 'ς.json'), ci));
+    assert.notEqual(lockPath(join(dir, 'a.json'), cs), lockPath(join(dir, 'b.json'), cs));
     assert.equal(typeof isCaseInsensitiveDir(dir), 'boolean');
     assert.deepEqual(readdirSync(dir), []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
