@@ -209,7 +209,7 @@ test('ayrılmış kilit adı duyarsız dizinde reddedilir; duyarlı dizinde kend
   const dir = tmp();
   try {
     const ci = { probe: () => true }, cs = { probe: () => false };
-    for (const name of ['.lock-dir.lock', '.LOCK-DIR.LOCK']) {
+    for (const name of ['.lock-dir.lock', '.LOCK-DIR.LOCK', '.lock-dir.lock.', '.Lock-Dir.Lock. .']) {
       const f = join(dir, name);
       writeFileSync(f, 'veri');
       assert.throws(() => lockPath(f, ci), /ayrılmış/);

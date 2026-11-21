@@ -41,6 +41,12 @@ export function isCaseInsensitiveDir(dir) {
   finally { try { unlinkSync(p); } catch {} }
 }
 
+// Win32 ignores trailing dots and spaces in the final component, so "name." names the same file as "name".
+export function isReservedLockName(base) {
+  const b = base.replace(/[. ]+$/, '');
+  return b.toLowerCase() === SHARED_LOCK_NAME || b.toUpperCase() === SHARED_LOCK_NAME.toUpperCase();
+}
+
 // Lock path for a data file. The directory is resolved with realpath (so symlinked directory aliases
 // agree); on a case-insensitive directory every data file shares one fixed
 // per-directory lock, even when the data file does not exist yet. `probe` may be injected for tests.
@@ -51,7 +57,7 @@ export function lockPath(file, { probe = isCaseInsensitiveDir } = {}) {
   // reproduce the filesystem's own case mapping (e.g. Σ/σ/ς).
   if (probe(dir)) {
     const base = basename(abs);
-    if (base.toLowerCase() === SHARED_LOCK_NAME || base.toUpperCase() === SHARED_LOCK_NAME.toUpperCase()) {
+    if (isReservedLockName(base)) {
       throw new Error(`Veri dosyası adı "${base}" deponun kilidi için ayrılmıştır; başka bir ad kullanın.`);
     }
     return join(dir, SHARED_LOCK_NAME);
@@ -74,7 +80,7 @@ export function withLock(file, fn, { timeoutMs = LOCK_TIMEOUT_MS, probe } = {}) 
       if (e.code !== 'EEXIST') throw e;
       if (process.hrtime.bigint() - start >= limit) {
         throw new Error(`Kilit alınamadı (${timeoutMs} ms): ${lock} başka bir işlem tarafından tutuluyor.` +
-          (lock === resolve(file) ? '' : ' Eski bir kilit dosyasıysa silin.'));
+          (lock === resolve(file) || isReservedLockName(basename(file)) ? '' : ' Eski bir kilit dosyasıysa silin.'));
       }
       Atomics.wait(sleepBuf, 0, 0, LOCK_RETRY_MS);
     }
