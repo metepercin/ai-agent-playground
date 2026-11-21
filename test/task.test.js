@@ -58,7 +58,7 @@ test('CLI uçtan uca: add, list, done', () => {
 
 import { spawn } from 'node:child_process';
 import { writeFileSync, readdirSync, symlinkSync, existsSync, mkdirSync, lstatSync, readlinkSync } from 'node:fs';
-import { withLock, lockPath, isCaseInsensitiveDir } from '../src/store.js';
+import { withLock, update, lockPath, isCaseInsensitiveDir } from '../src/store.js';
 
 const runCli = (args, file) => new Promise((res) => {
   const p = spawn(process.execPath, [cli, ...args], { env: { ...process.env, TASKS_FILE: file } });
@@ -203,4 +203,29 @@ test('save yazma hatasında eski dosyayı korur ve geçici dosyayı siler', asyn
   assert.equal(readFileSync(file, 'utf8'), before);
   assert.deepEqual(readdirSync(dir), ['tasks.json']);
   rmSync(dir, { recursive: true });
+});
+
+test('ayrılmış kilit adı duyarsız dizinde reddedilir; duyarlı dizinde kendi kilidini alır', () => {
+  const dir = tmp();
+  try {
+    const ci = { probe: () => true }, cs = { probe: () => false };
+    for (const name of ['.lock-dir.lock', '.LOCK-DIR.LOCK']) {
+      const f = join(dir, name);
+      writeFileSync(f, 'veri');
+      assert.throws(() => lockPath(f, ci), /ayrılmış/);
+      assert.throws(() => withLock(f, () => assert.fail('çalışmamalı'), ci), /ayrılmış/);
+      assert.throws(() => update(f, () => {}, ci), /ayrılmış/);
+      assert.equal(readFileSync(f, 'utf8'), 'veri');
+      assert.deepEqual(readdirSync(dir), [name]);
+      rmSync(f);
+    }
+    const ok = join(dir, 'tasks.json');
+    update(ok, (d) => addTask(d, 'x'), ci);
+    assert.equal(load(ok).tasks.length, 1);
+    const f = join(dir, '.lock-dir.lock');
+    assert.notEqual(lockPath(f, cs), f);
+    assert.notEqual(lockPath(f, cs), lockPath(join(dir, 'b.json'), cs));
+    update(f, (d) => addTask(d, 'y'), cs);
+    assert.equal(load(f).tasks.length, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -5,6 +5,7 @@ import { dirname, basename, join, resolve } from 'node:path';
 
 const LOCK_TIMEOUT_MS = 5000;
 const LOCK_RETRY_MS = 20;
+const SHARED_LOCK_NAME = '.lock-dir.lock';
 
 export function load(file) {
   if (!existsSync(file)) return { nextId: 1, tasks: [] };
@@ -48,7 +49,13 @@ export function lockPath(file, { probe = isCaseInsensitiveDir } = {}) {
   const dir = fs.realpathSync(dirname(abs));
   // Case-insensitive directory: one shared lock for the whole directory, since we cannot
   // reproduce the filesystem's own case mapping (e.g. Σ/σ/ς).
-  if (probe(dir)) return join(dir, '.lock-dir.lock');
+  if (probe(dir)) {
+    const base = basename(abs);
+    if (base.toLowerCase() === SHARED_LOCK_NAME || base.toUpperCase() === SHARED_LOCK_NAME.toUpperCase()) {
+      throw new Error(`Veri dosyası adı "${base}" deponun kilidi için ayrılmıştır; başka bir ad kullanın.`);
+    }
+    return join(dir, SHARED_LOCK_NAME);
+  }
   return sibling(join(dir, basename(abs)), 'lock', '.lock');
 }
 
@@ -56,8 +63,8 @@ const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
 
 // Serializes read-modify-write across processes using an exclusive lock file.
 // The timeout uses a monotonic clock so wall-clock changes cannot affect it.
-export function withLock(file, fn, { timeoutMs = LOCK_TIMEOUT_MS } = {}) {
-  const lock = lockPath(file);
+export function withLock(file, fn, { timeoutMs = LOCK_TIMEOUT_MS, probe } = {}) {
+  const lock = lockPath(file, probe ? { probe } : undefined);
   const start = process.hrtime.bigint();
   const limit = BigInt(timeoutMs) * 1000000n;
   let fd;
@@ -66,7 +73,8 @@ export function withLock(file, fn, { timeoutMs = LOCK_TIMEOUT_MS } = {}) {
     catch (e) {
       if (e.code !== 'EEXIST') throw e;
       if (process.hrtime.bigint() - start >= limit) {
-        throw new Error(`Kilit alınamadı (${timeoutMs} ms): ${lock} başka bir işlem tarafından tutuluyor. Eski bir kilitse silin.`);
+        throw new Error(`Kilit alınamadı (${timeoutMs} ms): ${lock} başka bir işlem tarafından tutuluyor.` +
+          (lock === resolve(file) ? '' : ' Eski bir kilit dosyasıysa silin.'));
       }
       Atomics.wait(sleepBuf, 0, 0, LOCK_RETRY_MS);
     }
@@ -79,13 +87,13 @@ export function withLock(file, fn, { timeoutMs = LOCK_TIMEOUT_MS } = {}) {
   }
 }
 
-export function update(file, fn) {
+export function update(file, fn, opts) {
   return withLock(file, () => {
     const data = load(file);
     const result = fn(data);
     save(file, data);
     return result;
-  });
+  }, opts);
 }
 
 export function save(file, data) {
